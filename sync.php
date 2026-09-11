@@ -481,7 +481,7 @@ function main(array $argv): int
 
             $policy = sync_sender_policy($ch, $base, $address, $target, $dryRun);
 
-            if ($verbose || $diff['add'] || $diff['remove'] || $policy !== null) {
+            if ($verbose || ($dryRun && ($diff['add'] || $diff['remove'] || $policy !== null))) {
                 $prefix = $dryRun ? 'would sync' : 'synced';
                 echo "$prefix $address: +", count($diff['add']), ' -', count($diff['remove']),
                     ' members', $policy !== null ? "; $policy" : '', "\n";

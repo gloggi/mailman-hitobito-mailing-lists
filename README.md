@@ -28,8 +28,8 @@ web forms (`csv_view`, `mass_subscribe`, `mass_removal`,
 5. `php sync.php --dry-run -v` and read the output before the first real run.
 6. Add the cronjob in the Control Panel under *Erweitert → Cronjobs*, hourly:
    `0 * * * *` -> `php /home/<user>/mailman-hitobito-mailing-lists/sync.php`
-   Hostpoint mails you anything the job prints, and the job stays quiet unless
-   something changed or went wrong.
+   Hostpoint mails you anything the job prints, and the job prints nothing unless
+   something went wrong.
 
 ## What it syncs
 
@@ -56,7 +56,8 @@ transfer. People who relied on it need to be subscribers of a list with
 ## Flags
 
 - `--dry-run` — report the diff, write nothing.
-- `-v` — print every list, not just the ones that changed.
+- `-v` — print every list. Without it a successful run prints nothing, so cron only
+  mails you when something is wrong.
 - `--force` — allow emptying a list. Without it, a hitobito list that reports zero
   subscribers against a non-empty Mailman list is skipped and flagged, so an API
   hiccup can't wipe a live list.
