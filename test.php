@@ -175,4 +175,24 @@ assert(lines_to_set("a@b.ch\n\n  c@d.ch  \n") === ['a@b.ch' => true, 'c@d.ch' =>
 // Django expects repeated names for multi-value fields, not PHP's name[0]=.
 assert(encode_form(['a' => 'x y', 'b' => ['1', '2']]) === 'a=x+y&b=1&b=2');
 
+// --------------------------------------------------------- 404 bug report dump
+
+$report = describe_hitobito_response(
+    ["HTTP/2 404 \r\n", "x-request-id: abc-123\r\n", "Set-Cookie: session=s3cret; path=/; Secure\r\n", "\r\n"],
+    '{"errors":[{"status":"404"}]}',
+    ['url' => 'https://db.scout.ch/api/mailing_lists?page=7', 'redirect_count' => 0, 'total_time' => 1.5],
+);
+assert(str_contains($report, 'url: https://db.scout.ch/api/mailing_lists?page=7'));
+assert(str_contains($report, '< x-request-id: abc-123'));   // what hitobito needs to find it in their logs
+assert(str_contains($report, 'body: {"errors":[{"status":"404"}]}'));
+assert(!str_contains($report, '  < ' . PHP_EOL));           // the blank separator line is dropped
+// The dump is for pasting into a bug report, so no session cookie survives it.
+assert(str_contains($report, '< Set-Cookie: session=…; path=/; Secure'));
+assert(!str_contains($report, 's3cret'));
+
+// A stray HTML page is excerpted, not dumped; an empty body still says so.
+$long = describe_hitobito_response([], str_repeat('x', 5000), []);
+assert(str_contains($long, 'body (5000 bytes): ' . str_repeat('x', 2000) . '…'));
+assert(describe_hitobito_response([], "  \n", []) === '  body: (empty)');
+
 echo "";

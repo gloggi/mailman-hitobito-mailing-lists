@@ -13,6 +13,8 @@ const SETTINGS_SECTION = 'message_acceptance';
 // Resolving the subscribers of a page takes hitobito well over a minute. Nothing here
 // is interactive, so one generous timeout beats tuning it per request.
 const HTTP_TIMEOUT = 300;
+// A hitobito error page is small; a stray HTML page is not worth a full dump.
+const BODY_EXCERPT = 2000;
 
 /** Most permissive last. Only 'accept' and 'hold' are ever produced from hitobito. */
 const ACTION_RANK = ['discard' => 0, 'reject' => 1, 'hold' => 2, 'defer' => 3, 'accept' => 4];
@@ -238,6 +240,32 @@ function lines_to_set(string $value): array
     return $set;
 }
 
+function describe_hitobito_response(array $headers, string $body, array $info): string
+{
+    $lines = [];
+    foreach (['url', 'redirect_count', 'primary_ip', 'total_time'] as $key) {
+        if (isset($info[$key])) {
+            $lines[] = "  $key: " . $info[$key];
+        }
+    }
+    foreach ($headers as $header) {
+        $header = trim($header);
+        if ($header === '') {
+            continue;
+        }
+        $lines[] = '  < ' . preg_replace('/^(set-cookie:\s*[^=]*=)[^;]*/i', '$1…', $header);
+    }
+    $body = trim($body);
+    if ($body === '') {
+        $lines[] = '  body: (empty)';
+    } elseif (strlen($body) > BODY_EXCERPT) {
+        $lines[] = '  body (' . strlen($body) . ' bytes): ' . substr($body, 0, BODY_EXCERPT) . '…';
+    } else {
+        $lines[] = '  body: ' . $body;
+    }
+    return implode("\n", $lines);
+}
+
 /** Django wants repeated `name=` pairs for multi-value fields, not PHP's `name[0]=`. */
 function encode_form(array $fields): string
 {
@@ -254,12 +282,17 @@ function encode_form(array $fields): string
 
 function http(CurlHandle $ch, string $url, ?array $post = null, ?string $referer = null, array $headers = []): array
 {
+    $received = [];
     $options = [
         CURLOPT_URL => $url,
         // Django rejects HTTPS POSTs whose Referer isn't same-origin.
         CURLOPT_REFERER => $referer ?? '',
         CURLOPT_HTTPHEADER => $headers,
         CURLOPT_TIMEOUT => HTTP_TIMEOUT,
+        CURLOPT_HEADERFUNCTION => function ($ch, $line) use (&$received) {
+            $received[] = $line;
+            return strlen($line);
+        },
     ];
     if ($post !== null) {
         $options[CURLOPT_POST] = true;
@@ -273,7 +306,7 @@ function http(CurlHandle $ch, string $url, ?array $post = null, ?string $referer
     if ($body === false) {
         throw new RuntimeException("$url: " . curl_error($ch));
     }
-    return [curl_getinfo($ch, CURLINFO_RESPONSE_CODE), (string) $body];
+    return [curl_getinfo($ch, CURLINFO_RESPONSE_CODE), (string) $body, $received];
 }
 
 function hitobito_targets(CurlHandle $ch, array $config): array
@@ -289,12 +322,14 @@ function hitobito_targets(CurlHandle $ch, array $config): array
             'page' => ['size' => PAGE_SIZE, 'number' => $page],
         ]);
         $url = rtrim($config['hitobito_url'], '/') . '/api/mailing_lists?' . $query;
-        [$status, $body] = http($ch, $url, null, null, [
+        [$status, $body, $headers] = http($ch, $url, null, null, [
             'X-TOKEN: ' . $config['hitobito_token'],
             'Accept: application/vnd.api+json',
         ]);
         if ($status !== 200) {
-            throw new RuntimeException("hitobito returned $status for $url");
+            throw new RuntimeException("hitobito returned $status for $url\n"
+                . "  pages read so far: " . ($page - 1) . ', lists collected: ' . count($targets) . "\n"
+                . describe_hitobito_response($headers, $body, curl_getinfo($ch)));
         }
 
         $payload = json_decode($body, true, 512, JSON_THROW_ON_ERROR);
